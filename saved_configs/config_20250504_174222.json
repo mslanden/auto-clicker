@@ -1,0 +1,133 @@
+{
+    "buttons": [
+        {
+            "position": [
+                282,
+                652
+            ],
+            "interval": 1.0,
+            "name": "Button 1",
+            "is_sequence_only": false
+        },
+        {
+            "position": [
+                350,
+                649
+            ],
+            "interval": 5.0,
+            "name": "Button 2",
+            "is_sequence_only": false
+        },
+        {
+            "position": [
+                526,
+                321
+            ],
+            "interval": 0,
+            "name": "Button 3",
+            "is_sequence_only": true
+        },
+        {
+            "position": [
+                109,
+                381
+            ],
+            "interval": 0,
+            "name": "Button 4",
+            "is_sequence_only": true
+        },
+        {
+            "position": [
+                145,
+                602
+            ],
+            "interval": 0,
+            "name": "Button 5",
+            "is_sequence_only": true
+        },
+        {
+            "position": [
+                417,
+                487
+            ],
+            "interval": 0,
+            "name": "Button 6",
+            "is_sequence_only": true
+        },
+        {
+            "position": [
+                320,
+                518
+            ],
+            "interval": 0,
+            "name": "Button 7",
+            "is_sequence_only": true
+        },
+        {
+            "position": [
+                253,
+                347
+            ],
+            "interval": 0,
+            "name": "Button 8",
+            "is_sequence_only": true
+        }
+    ],
+    "sequences": [
+        {
+            "interval": 5.0,
+            "pause_regular": true,
+            "manual_trigger_only": true,
+            "steps": [
+                {
+                    "button_name": "Button 3",
+                    "position": [
+                        526,
+                        321
+                    ],
+                    "delay": 2.0
+                },
+                {
+                    "button_name": "Button 4",
+                    "position": [
+                        109,
+                        381
+                    ],
+                    "delay": 2.0
+                },
+                {
+                    "button_name": "Button 5",
+                    "position": [
+                        145,
+                        602
+                    ],
+                    "delay": 2.0
+                },
+                {
+                    "button_name": "Button 6",
+                    "position": [
+                        417,
+                        487
+                    ],
+                    "delay": 2.0
+                },
+                {
+                    "button_name": "Button 7",
+                    "position": [
+                        320,
+                        518
+                    ],
+                    "delay": 2.0
+                },
+                {
+                    "button_name": "Button 8",
+                    "position": [
+                        253,
+                        347
+                    ],
+                    "delay": 0.0
+                }
+            ]
+        }
+    ]
+}
