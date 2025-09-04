@@ -2,22 +2,29 @@
 __pycache__/
 *.py[cod]
 *$py.class
+*.pyo
+*.pyc
 
 # Distribution / packaging
 dist/
 build/
 *.egg-info/
+*.egg
 
 # Virtual environments
 venv/
+venv_gui/
 env/
 ENV/
+.venv/
 
 # IDE specific files
 .idea/
 .vscode/
 *.sublime-workspace
 *.sublime-project
+*.swp
+*.swo
 
 # OS specific files
 .DS_Store
@@ -27,7 +34,19 @@ ENV/
 .Trashes
 ehthumbs.db
 Thumbs.db
+desktop.ini
+
+# Flask specific
+instance/
+*.db
 
 # Auto clicker specific
-# Uncomment the line below if you don't want to share your saved configurations
+# Configuration files (uncomment if you don't want to share)
 # saved_configs/
+
+# Log files
+*.log
+
+# Claude AI specific
+.claude/
+CLAUDE.md

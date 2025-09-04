@@ -1,0 +1,87 @@
+{
+    "version": "2.0_enhanced",
+    "created": "2025-08-09T12:15:09.637658",
+    "buttons": [
+        {
+            "name": "Button 1",
+            "position": [
+                278,
+                650
+            ],
+            "interval": 1.0,
+            "is_sequence_only": false,
+            "color": "red",
+            "enabled": true
+        },
+        {
+            "name": "Button 2",
+            "position": [
+                314,
+                649
+            ],
+            "interval": 5.0,
+            "is_sequence_only": false,
+            "color": "red",
+            "enabled": true
+        },
+        {
+            "name": "Button 3",
+            "position": [
+                349,
+                653
+            ],
+            "interval": 10.0,
+            "is_sequence_only": false,
+            "color": "red",
+            "enabled": true
+        },
+        {
+            "name": "Button 4",
+            "position": [
+                418,
+                651
+            ],
+            "interval": 25.0,
+            "is_sequence_only": false,
+            "color": "red",
+            "enabled": true
+        },
+        {
+            "name": "button2",
+            "position": [
+                316,
+                652
+            ],
+            "interval": 5.0,
+            "is_sequence_only": false,
+            "color": "blue",
+            "enabled": true
+        }
+    ],
+    "sequences": [],
+    "settings": {
+        "global_speed_multiplier": 3.0,
+        "visual_feedback_enabled": true,
+        "statistics_enabled": true,
+        "button_states": {
+            "0": true,
+            "1": true,
+            "2": true,
+            "3": true,
+            "4": true
+        },
+        "button_intervals": {
+            "0": 1.0,
+            "1": 5.0,
+            "2": 10.0,
+            "3": 25.0,
+            "4": 5.0
+        }
+    },
+    "metadata": {
+        "total_buttons": 5,
+        "total_sequences": 0,
+        "platform": "Darwin",
+        "python_version": "3.12.9 (main, Feb  4 2025, 14:38:38) [Clang 16.0.0 (clang-1600.0.26.6)]"
+    }
+}
