@@ -15,6 +15,18 @@ A powerful web-based auto clicker application with a beautiful interface for aut
 - **Configuration Management**: Save and load click configurations
 - **Real-time Statistics**: Track total clicks, session time, and active positions
 
+## Migration from Previous Version
+
+If you're updating from the terminal-based `auto_clicker.py` to the new web version:
+
+1. **Backup your configurations**: Your old config files in `saved_configs/` will still work
+2. **Uninstall old dependencies** (if you had a virtual environment):
+   ```bash
+   pip uninstall python-time
+   ```
+3. **Install new dependencies**: Follow the installation steps below to get Flask
+4. **Run the new version**: Use `python auto_clicker_web.py` instead of `auto_clicker.py`
+
 ## Installation
 
 ### Prerequisites
@@ -25,8 +37,8 @@ A powerful web-based auto clicker application with a beautiful interface for aut
 
 1. Clone the repository:
 ```bash
-git clone <your-repo-url>
-cd terminal-bot
+git clone https://github.com/mslanden/auto-clicker.git
+cd auto-clicker
 ```
 
 2. Create a virtual environment (recommended):
@@ -88,7 +100,7 @@ Configurations are saved in the `saved_configs/` directory as JSON files contain
 ## Project Structure
 
 ```
-terminal-bot/
+auto-clicker/
 ├── auto_clicker_web.py    # Main application
 ├── requirements.txt       # Python dependencies
 ├── saved_configs/         # Configuration files
