@@ -4,7 +4,6 @@ Auto Clicker Web - Beautiful web-based interface
 """
 
 from flask import Flask, render_template, jsonify, request
-from flask_cors import CORS
 import pyautogui
 import threading
 import time
@@ -14,12 +13,14 @@ import random
 import webbrowser
 from datetime import datetime
 from pynput import keyboard
+import re
+import logging
 
 # Disable PyAutoGUI's fail-safe
 pyautogui.FAILSAFE = False
 
 app = Flask(__name__)
-CORS(app)
+logging.basicConfig(level=logging.INFO, format='[%(asctime)s] %(levelname)s: %(message)s')
 
 # Global state
 class ClickerState:
@@ -36,6 +37,21 @@ class ClickerState:
         self.total_clicks = 0
         self.session_start_time = None
         self.variance_enabled = True
+        # Global variance defaults
+        self.global_jitter_px = 3
+        self.global_time_jitter = 0.10  # 10%
+        # Limits
+        self.max_total_clicks = None  # int or None
+        self.max_session_minutes = None  # int or None
+        # Default start delay (seconds)
+        self.default_start_delay = 0
+        # Hotkeys (single-character, lowercased)
+        self.hotkeys = {
+            'pause': 'p',
+            'stop': 'q',
+        }
+        # Concurrency lock for state changes
+        self.lock = threading.Lock()
         
 clicker = ClickerState()
 
@@ -198,6 +214,9 @@ def index():
             transform: scale(1.05);
         }
         
+        .icon { width: 16px; height: 16px; display: inline-block; vertical-align: -2px; margin-right: 6px; }
+        .icon-btn .icon { margin-right: 0; }
+
         .positions-list {
             background: white;
             border-radius: 10px;
@@ -391,12 +410,139 @@ def index():
             padding: 2px 4px;
             white-space: nowrap;
         }
+
+        /* ---- Modern dark/glass overrides for a cooler look ---- */
+        :root {
+            --bg: #0b0f1a;
+            --surface: rgba(18, 24, 38, 0.8);
+            --surface-2: rgba(20, 28, 46, 0.7);
+            --border: rgba(255,255,255,0.08);
+            --text: #e7ecf4;
+            --muted: #97a2b1;
+            --brand: #7c5cff;
+            --brand-2: #2cd4d9;
+            --ok: #32d583;
+            --warn: #ffb020;
+            --danger: #ff5d5d;
+            --ring: rgba(124,92,255,0.45);
+        }
+        body {
+            background:
+              radial-gradient(1200px 700px at 15% -10%, rgba(124,92,255,0.18), transparent 60%),
+              radial-gradient(1000px 600px at 110% 0%, rgba(44,212,217,0.14), transparent 60%),
+              var(--bg) !important;
+            color: var(--text);
+        }
+        .container {
+            background: linear-gradient(180deg, rgba(255,255,255,0.04), rgba(255,255,255,0.02));
+            border: 1px solid var(--border);
+            backdrop-filter: blur(10px);
+            box-shadow: 0 20px 60px rgba(0,0,0,0.45), inset 0 1px 0 rgba(255,255,255,0.05);
+        }
+        .header {
+            background:
+              linear-gradient(135deg, rgba(124,92,255,0.22), rgba(44,212,217,0.18));
+            border-bottom: 1px solid var(--border);
+        }
+        .header h1 { text-shadow: 0 6px 28px rgba(124,92,255,0.35); }
+        .stats { gap: 18px !important; }
+        .stat {
+            background: var(--surface-2);
+            border: 1px solid var(--border);
+            border-radius: 14px;
+            padding: 16px 18px;
+            box-shadow: 0 10px 30px rgba(0,0,0,0.25);
+        }
+        .stat-value { color: var(--text); }
+        .stat-label { color: var(--muted); }
+        .controls { background: transparent; }
+        .btn { color: #fff; }
+        .btn-start { background: linear-gradient(135deg, var(--ok), #2cc79a); }
+        .btn-pause { background: linear-gradient(135deg, var(--warn), #ff9f43); }
+        .btn-stop { background: linear-gradient(135deg, var(--danger), #ff4d6d); }
+        .add-btn { background: linear-gradient(135deg, var(--brand), #5b87ff); }
+        .btn, .add-btn {
+            box-shadow: 0 14px 34px rgba(124,92,255,0.22);
+            border: 1px solid rgba(255,255,255,0.08);
+        }
+        .btn:hover, .add-btn:hover {
+            transform: translateY(-2px) scale(1.01);
+            box-shadow: 0 18px 48px rgba(124,92,255,0.32);
+        }
+        .content { padding: 26px; }
+        .section-title { color: var(--text); letter-spacing: .3px; }
+        .positions-list {
+            background: linear-gradient(180deg, rgba(255,255,255,0.03), rgba(255,255,255,0.02));
+            border: 1px solid var(--border);
+        }
+        .position-item {
+            background: rgba(255,255,255,0.02);
+            border-bottom: 1px solid var(--border);
+        }
+        .position-item:hover { background: rgba(124,92,255,0.08); }
+        .position-name { color: var(--text); }
+        .position-details { color: var(--muted); }
+        .btn-edit { background: rgba(124,92,255,0.18); color: #d7d0ff; }
+        .btn-delete { background: rgba(255,93,93,0.15); color: #ffb1b1; }
+        .settings { background: var(--surface-2); border: 1px solid var(--border); }
+        .modal { background: rgba(6, 8, 14, 0.6); backdrop-filter: blur(8px); }
+        .modal-content {
+            background: var(--surface);
+            border: 1px solid var(--border);
+            color: var(--text);
+        }
+        .form-input { background: rgba(255,255,255,0.06); border: 1px solid var(--border); color: var(--text); }
+        .form-input:focus { border-color: var(--ring); box-shadow: 0 0 0 4px rgba(124,92,255,0.12); }
+        .capture-info { background: rgba(124,92,255,0.14); color: #e8e2ff; }
+        .current-position { color: #c8b9ff; }
+        kbd { background: rgba(255,255,255,0.08); border: 1px solid var(--border); color: var(--text); }
     </style>
 </head>
 <body>
+    <!-- Inline SVG sprite for icons -->
+    <svg xmlns="http://www.w3.org/2000/svg" style="position:absolute;width:0;height:0;overflow:hidden">
+      <symbol id="i-mouse" viewBox="0 0 24 24">
+        <path fill="currentColor" d="M12 2a6 6 0 016 6v8a6 6 0 01-12 0V8a6 6 0 016-6zm0 2a4 4 0 00-4 4v2h8V8a4 4 0 00-4-4z"/>
+      </symbol>
+      <symbol id="i-play" viewBox="0 0 24 24">
+        <path fill="currentColor" d="M8 5v14l11-7z"/>
+      </symbol>
+      <symbol id="i-pause" viewBox="0 0 24 24">
+        <rect x="6" y="5" width="5" height="14" fill="currentColor"/>
+        <rect x="13" y="5" width="5" height="14" fill="currentColor"/>
+      </symbol>
+      <symbol id="i-stop" viewBox="0 0 24 24">
+        <rect x="6" y="6" width="12" height="12" rx="2" fill="currentColor"/>
+      </symbol>
+      <symbol id="i-plus" viewBox="0 0 24 24">
+        <path d="M12 5v14M5 12h14" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+      </symbol>
+      <symbol id="i-edit" viewBox="0 0 24 24">
+        <path d="M3 17.25V21h3.75L17.81 9.94l-3.75-3.75L3 17.25z" fill="currentColor"/>
+        <path d="M20.71 7.04a1 1 0 000-1.41L18.37 3.29a1 1 0 00-1.41 0l-1.84 1.84 3.75 3.75 1.84-1.84z" fill="currentColor"/>
+      </symbol>
+      <symbol id="i-trash" viewBox="0 0 24 24">
+        <path d="M6 7h12M9 7V5a2 2 0 012-2h2a2 2 0 012 2v2M7 7l1 12a2 2 0 002 2h4a2 2 0 002-2l1-12" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round"/>
+      </symbol>
+      <symbol id="i-pin" viewBox="0 0 24 24">
+        <path fill="currentColor" d="M12 2a7 7 0 00-7 7c0 5.5 7 13 7 13s7-7.5 7-13a7 7 0 00-7-7zm0 9a2 2 0 110-4 2 2 0 010 4z"/>
+      </symbol>
+      <symbol id="i-loop" viewBox="0 0 24 24">
+        <path d="M17 1l4 4-4 4" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
+        <path d="M3 11a8 8 0 0113-6l5 4" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round"/>
+        <path d="M7 23l-4-4 4-4" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
+        <path d="M21 13a8 8 0 01-13 6l-5-4" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round"/>
+      </symbol>
+      <symbol id="i-disk" viewBox="0 0 24 24">
+        <path fill="currentColor" d="M4 4h12l4 4v12a2 2 0 01-2 2H4a2 2 0 01-2-2V6a2 2 0 012-2zm3 0v5h8V4H7zm0 9h10v7H7v-7z"/>
+      </symbol>
+      <symbol id="i-folder" viewBox="0 0 24 24">
+        <path fill="currentColor" d="M3 6a2 2 0 012-2h5l2 2h7a2 2 0 012 2v8a2 2 0 01-2 2H5a2 2 0 01-2-2V6z"/>
+      </symbol>
+    </svg>
     <div class="container">
         <div class="header">
-            <h1>🖱️ Auto Clicker Pro</h1>
+            <h1><svg class="icon" aria-hidden="true"><use href="#i-mouse"></use></svg>Auto Clicker Pro</h1>
             <div class="stats">
                 <div class="stat">
                     <div class="stat-value" id="total-clicks">0</div>
@@ -414,29 +560,21 @@ def index():
         </div>
         
         <div class="controls">
-            <button class="btn btn-start" id="start-btn" onclick="startClicking()">
-                ▶️ Start
-            </button>
-            <button class="btn btn-pause" id="pause-btn" onclick="pauseClicking()" disabled>
-                ⏸️ Pause
-            </button>
-            <button class="btn btn-stop" id="stop-btn" onclick="stopClicking()" disabled>
-                ⏹️ Stop
-            </button>
+            <button class="btn btn-start" id="start-btn" onclick="startClicking()"><svg class="icon" aria-hidden="true"><use href="#i-play"></use></svg>Start</button>
+            <button class="btn btn-pause" id="pause-btn" onclick="pauseClicking()" disabled><svg class="icon" aria-hidden="true"><use href="#i-pause"></use></svg>Pause</button>
+            <button class="btn btn-stop" id="stop-btn" onclick="stopClicking()" disabled><svg class="icon" aria-hidden="true"><use href="#i-stop"></use></svg>Stop</button>
         </div>
         
         <div class="content">
             <div class="section">
                 <div class="section-header">
                     <h2 class="section-title">Click Positions</h2>
-                    <button class="add-btn" onclick="showAddModal()">
-                        ➕ Add Position
-                    </button>
+                    <button class="add-btn" id="add-position-btn" onclick="showAddModal()"><svg class="icon" aria-hidden="true"><use href="#i-plus"></use></svg>Add Position</button>
                 </div>
                 
                 <div id="positions-container">
                     <div class="empty-state">
-                        <div class="empty-state-icon">📍</div>
+                        <div class="empty-state-icon"><svg class="icon" aria-hidden="true"><use href="#i-pin"></use></svg></div>
                         <div class="empty-state-text">No positions added yet</div>
                     </div>
                 </div>
@@ -445,14 +583,12 @@ def index():
             <div class="section">
                 <div class="section-header">
                     <h2 class="section-title">Sequences</h2>
-                    <button class="add-btn" onclick="showSequenceModal()">
-                        ➕ Add Sequence
-                    </button>
+                    <button class="add-btn" id="add-seq-btn" onclick="showSequenceModal()"><svg class="icon" aria-hidden="true"><use href="#i-plus"></use></svg>Add Sequence</button>
                 </div>
                 
                 <div id="sequences-container">
                     <div class="empty-state">
-                        <div class="empty-state-icon">🔄</div>
+                        <div class="empty-state-icon"><svg class="icon" aria-hidden="true"><use href="#i-loop"></use></svg></div>
                         <div class="empty-state-text">No sequences created yet</div>
                     </div>
                 </div>
@@ -465,13 +601,42 @@ def index():
                         <input type="checkbox" id="variance-enabled" checked onchange="updateVariance()">
                         <label for="variance-enabled">Enable anti-detection variance (±3px position, ±10% timing)</label>
                     </div>
+                    <div class="form-group">
+                        <label class="form-label">Start Delay (seconds)</label>
+                        <input type="number" class="form-input" id="start-delay" value="0" min="0" step="1">
+                    </div>
+                    <div class="form-group">
+                        <label class="form-label">Global Jitter (px)</label>
+                        <input type="number" class="form-input" id="global-jitter-px" value="3" min="0">
+                    </div>
+                    <div class="form-group">
+                        <label class="form-label">Global Timing Jitter (%)</label>
+                        <input type="number" class="form-input" id="global-jitter-time" value="10" min="0" max="100">
+                    </div>
+                    <div class="form-group">
+                        <label class="form-label">Max Total Clicks (optional)</label>
+                        <input type="number" class="form-input" id="max-total-clicks" min="0" placeholder="e.g., 1000">
+                    </div>
+                    <div class="form-group">
+                        <label class="form-label">Max Session Minutes (optional)</label>
+                        <input type="number" class="form-input" id="max-session-mins" min="0" placeholder="e.g., 60">
+                    </div>
+                    <div class="form-group">
+                        <label class="form-label">Hotkeys</label>
+                        <div>
+                            Pause <input type="text" class="form-input" id="hotkey-pause" maxlength="1" style="width:60px; display:inline-block;"> 
+                            Stop <input type="text" class="form-input" id="hotkey-stop" maxlength="1" style="width:60px; display:inline-block;">
+                        </div>
+                    </div>
                     <div style="margin-top: 15px;">
                         <strong>Global Keyboard Shortcuts:</strong><br>
-                        <kbd>P</kbd> = Pause/Resume | <kbd>Q</kbd> = Stop | <kbd>1-9</kbd> = Trigger Sequences
+                        <kbd id="kbd-pause">P</kbd> = Pause/Resume | <kbd id="kbd-stop">Q</kbd> = Stop | <kbd>1-9</kbd> = Trigger Sequences
                     </div>
                     <div class="checkbox-group">
-                        <button class="add-btn" onclick="saveConfig()">💾 Save Config</button>
-                        <button class="add-btn" onclick="loadConfig()" style="margin-left: 10px;">📁 Load Config</button>
+                        <button class="add-btn" onclick="saveConfig()"><svg class="icon" aria-hidden="true"><use href="#i-disk"></use></svg>Save Config</button>
+                        <button class="add-btn" onclick="loadConfig()" style="margin-left: 10px;"><svg class="icon" aria-hidden="true"><use href="#i-folder"></use></svg>Load Config</button>
+                        <button class="add-btn" onclick="saveSettings()" style="margin-left: 10px;"><svg class="icon" aria-hidden="true"><use href="#i-disk"></use></svg>Save Settings</button>
+                        <button class="add-btn" onclick="resetStats()" style="margin-left: 10px;"><svg class="icon" aria-hidden="true"><use href="#i-loop"></use></svg>Reset Stats</button>
                     </div>
                 </div>
             </div>
@@ -509,10 +674,38 @@ def index():
                 <label class="form-label">Click Interval (seconds)</label>
                 <input type="number" class="form-input" id="position-interval" value="1.0" step="0.1" min="0.1">
             </div>
+            <div class="form-group">
+                <label class="form-label">Mouse Button</label>
+                <select class="form-input" id="position-button">
+                    <option value="left">Left</option>
+                    <option value="middle">Middle</option>
+                    <option value="right">Right</option>
+                </select>
+            </div>
+            <div class="form-group">
+                <label class="form-label">Click Type</label>
+                <select class="form-input" id="position-click-type" onchange="toggleHold()">
+                    <option value="single">Single</option>
+                    <option value="double">Double</option>
+                    <option value="hold">Hold</option>
+                </select>
+            </div>
+            <div class="form-group">
+                <label class="form-label">Hold Duration (seconds)</label>
+                <input type="number" class="form-input" id="position-hold" value="0.2" step="0.05" min="0" disabled>
+            </div>
+            <div class="form-group">
+                <label class="form-label">Per-position Jitter (px)</label>
+                <input type="number" class="form-input" id="position-jitter-px" value="3" min="0">
+            </div>
+            <div class="form-group">
+                <label class="form-label">Per-position Timing Jitter (%)</label>
+                <input type="number" class="form-input" id="position-jitter-time" value="10" min="0" max="100">
+            </div>
             
             <div class="form-actions">
-                <button class="btn" onclick="retakePosition()" id="retake-btn" style="display: none;">🔄 Retake</button>
-                <button class="btn btn-start" onclick="savePosition()" id="save-btn" disabled>💾 Save</button>
+                <button class="btn" onclick="retakePosition()" id="retake-btn" style="display: none;"><svg class="icon" aria-hidden="true"><use href="#i-loop"></use></svg>Retake</button>
+                <button class="btn btn-start" onclick="savePosition()" id="save-btn" disabled><svg class="icon" aria-hidden="true"><use href="#i-disk"></use></svg>Save</button>
                 <button class="btn" onclick="closeModal()">Cancel</button>
             </div>
         </div>
@@ -567,7 +760,7 @@ def index():
             </div>
             
             <div class="form-actions">
-                <button class="btn btn-start" onclick="saveSequence()">💾 Save Sequence</button>
+                <button class="btn btn-start" onclick="saveSequence()"><svg class="icon" aria-hidden="true"><use href="#i-disk"></use></svg>Save Sequence</button>
                 <button class="btn" onclick="closeSequenceModal()">Cancel</button>
             </div>
         </div>
@@ -703,57 +896,57 @@ def index():
                 alert('Please capture a position first by pressing ENTER while hovering over your target');
                 return;
             }
-            
             const name = document.getElementById('position-name').value;
             const x = parseInt(document.getElementById('position-x').value);
             const y = parseInt(document.getElementById('position-y').value);
             const interval = parseFloat(document.getElementById('position-interval').value);
-            
+            const button = document.getElementById('position-button').value;
+            const click_type = document.getElementById('position-click-type').value;
+            const hold_duration = parseFloat(document.getElementById('position-hold').value || '0');
+            const pos_jitter = parseInt(document.getElementById('position-jitter-px').value || '0');
+            const time_jitter = parseFloat(document.getElementById('position-jitter-time').value || '0') / 100.0;
             if (!name.trim()) {
                 alert('Please enter a position name');
                 return;
             }
-            
             fetch('/api/add-position', {
                 method: 'POST',
                 headers: {'Content-Type': 'application/json'},
-                body: JSON.stringify({name, x, y, interval})
+                body: JSON.stringify({name, x, y, interval, button, click_type, hold_duration, pos_jitter, time_jitter})
             })
             .then(r => r.json())
             .then(data => {
                 if (data.success) {
                     loadPositions();
                     closeModal();
+                } else if (data.message) {
+                    alert(data.message);
                 }
             });
         }
         
         function editPosition(index) {
             const pos = positions[index];
-            
-            // Pre-fill the add modal with existing values
             document.getElementById('add-modal').classList.add('active');
             document.getElementById('position-name').value = pos.name;
             document.getElementById('position-x').value = pos.x;
             document.getElementById('position-y').value = pos.y;
             document.getElementById('position-interval').value = pos.interval;
-            
-            // Show as captured already - DISABLE capture mode for editing
+            document.getElementById('position-button').value = pos.button || 'left';
+            document.getElementById('position-click-type').value = pos.click_type || 'single';
+            document.getElementById('position-hold').value = pos.hold_duration || 0;
+            document.getElementById('position-jitter-px').value = (pos.pos_jitter ?? 3);
+            document.getElementById('position-jitter-time').value = Math.round(((pos.time_jitter ?? 0.1) * 100));
+            toggleHold();
             captured = true;
-            captureMode = false;  // Important: disable Enter key capture
+            captureMode = false;
             document.getElementById('capture-status').textContent = 'Position loaded for editing';
             document.getElementById('capture-status').style.color = '#4CAF50';
             document.getElementById('save-btn').disabled = false;
             document.getElementById('retake-btn').style.display = 'inline-block';
-            
-            // Set up Enter key listener for edit mode (different behavior)
             document.addEventListener('keydown', handleEditKeyPress);
-            
-            // Change save function to update instead of create
             const saveBtn = document.getElementById('save-btn');
-            saveBtn.onclick = function() {
-                updatePosition(index);
-            };
+            saveBtn.onclick = function() { updatePosition(index); };
         }
         
         function updatePosition(index) {
@@ -761,24 +954,28 @@ def index():
             const x = parseInt(document.getElementById('position-x').value);
             const y = parseInt(document.getElementById('position-y').value);
             const interval = parseFloat(document.getElementById('position-interval').value);
-            
+            const button = document.getElementById('position-button').value;
+            const click_type = document.getElementById('position-click-type').value;
+            const hold_duration = parseFloat(document.getElementById('position-hold').value || '0');
+            const pos_jitter = parseInt(document.getElementById('position-jitter-px').value || '0');
+            const time_jitter = parseFloat(document.getElementById('position-jitter-time').value || '0') / 100.0;
             if (!name.trim()) {
                 alert('Please enter a position name');
                 return;
             }
-            
             fetch(`/api/update-position/${index}`, {
                 method: 'PUT',
                 headers: {'Content-Type': 'application/json'},
-                body: JSON.stringify({name, x, y, interval})
+                body: JSON.stringify({name, x, y, interval, button, click_type, hold_duration, pos_jitter, time_jitter})
             })
             .then(r => r.json())
             .then(data => {
                 if (data.success) {
                     loadPositions();
                     closeModal();
-                    // Reset save button for normal use
                     document.getElementById('save-btn').onclick = savePosition;
+                } else if (data.message) {
+                    alert(data.message);
                 }
             });
         }
@@ -790,7 +987,7 @@ def index():
                     .then(data => {
                         if (data.success) {
                             loadPositions();
-                        }
+                        } else if (data.message) { alert(data.message); }
                     });
             }
         }
@@ -811,7 +1008,7 @@ def index():
             if (positions.length === 0) {
                 container.innerHTML = `
                     <div class="empty-state">
-                        <div class="empty-state-icon">📍</div>
+                        <div class="empty-state-icon"><svg class="icon" aria-hidden="true"><use href="#i-pin"></use></svg></div>
                         <div class="empty-state-text">No positions added yet</div>
                     </div>
                 `;
@@ -824,12 +1021,12 @@ def index():
                         <div class="position-info">
                             <div class="position-name">${pos.name}</div>
                             <div class="position-details">
-                                Position: (${pos.x}, ${pos.y}) | Interval: ${pos.interval}s | Clicks: ${pos.clicks || 0}
+                                (${pos.x}, ${pos.y}) · ${pos.button || 'left'} · ${pos.click_type || 'single'}${pos.click_type==='hold' ? ' ' + (pos.hold_duration||0)+'s' : ''} · every ${pos.interval}s · jitter ${pos.pos_jitter ?? 3}px/${Math.round(((pos.time_jitter ?? 0.1)*100))}% · clicks ${pos.clicks || 0}
                             </div>
                         </div>
                         <div class="position-actions">
-                            <button class="icon-btn btn-edit" onclick="editPosition(${i})" title="Edit">✏️</button>
-                            <button class="icon-btn btn-delete" onclick="deletePosition(${i})" title="Delete">🗑️</button>
+                            <button class="icon-btn btn-edit" onclick="editPosition(${i})" title="Edit"><svg class="icon" aria-hidden="true"><use href="#i-edit"></use></svg></button>
+                            <button class="icon-btn btn-delete" onclick="deletePosition(${i})" title="Delete"><svg class="icon" aria-hidden="true"><use href="#i-trash"></use></svg></button>
                         </div>
                     </div>
                 `).join('') +
@@ -837,7 +1034,8 @@ def index():
         }
         
         function startClicking() {
-            fetch('/api/start', {method: 'POST'})
+            const start_delay = parseInt(document.getElementById('start-delay').value || '0');
+            fetch('/api/start', {method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({start_delay})})
                 .then(r => r.json())
                 .then(data => {
                     if (data.success) {
@@ -856,12 +1054,17 @@ def index():
                 .then(r => r.json())
                 .then(data => {
                     const btn = document.getElementById('pause-btn');
-                    if (data.paused) {
-                        btn.textContent = '▶️ Resume';
-                    } else {
-                        btn.textContent = '⏸️ Pause';
-                    }
+                    setPauseButton(data.paused);
                 });
+        }
+
+        function setPauseButton(isPaused) {
+            const btn = document.getElementById('pause-btn');
+            if (isPaused) {
+                btn.innerHTML = '<svg class="icon" aria-hidden="true"><use href="#i-play"></use></svg>Resume';
+            } else {
+                btn.innerHTML = '<svg class="icon" aria-hidden="true"><use href="#i-pause"></use></svg>Pause';
+            }
         }
         
         function stopClicking() {
@@ -871,18 +1074,64 @@ def index():
                     document.getElementById('start-btn').disabled = false;
                     document.getElementById('pause-btn').disabled = true;
                     document.getElementById('stop-btn').disabled = true;
-                    document.getElementById('pause-btn').textContent = '⏸️ Pause';
+                    setPauseButton(false);
                     stopUpdates();
                 });
         }
         
         function updateVariance() {
-            const enabled = document.getElementById('variance-enabled').checked;
-            fetch('/api/variance', {
+            const variance_enabled = document.getElementById('variance-enabled').checked;
+            fetch('/api/settings', {
                 method: 'POST',
                 headers: {'Content-Type': 'application/json'},
-                body: JSON.stringify({enabled})
+                body: JSON.stringify({variance_enabled})
             });
+        }
+
+        function saveSettings() {
+            const variance_enabled = document.getElementById('variance-enabled').checked;
+            const global_jitter_px = parseInt(document.getElementById('global-jitter-px').value || '0');
+            const global_jitter_time = parseFloat(document.getElementById('global-jitter-time').value || '0') / 100.0;
+            const max_total_clicks = document.getElementById('max-total-clicks').value;
+            const max_session_minutes = document.getElementById('max-session-mins').value;
+            const default_start_delay = parseInt(document.getElementById('start-delay').value || '0');
+            const pauseKey = (document.getElementById('hotkey-pause').value || 'p').toLowerCase();
+            const stopKey = (document.getElementById('hotkey-stop').value || 'q').toLowerCase();
+            fetch('/api/settings', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({
+                    variance_enabled,
+                    global_jitter_px,
+                    global_time_jitter: global_jitter_time,
+                    max_total_clicks: max_total_clicks === '' ? null : parseInt(max_total_clicks),
+                    max_session_minutes: max_session_minutes === '' ? null : parseInt(max_session_minutes),
+                    default_start_delay,
+                    hotkeys: { pause: pauseKey, stop: stopKey }
+                })
+            }).then(() => loadStatsOnce());
+        }
+
+        function resetStats() {
+            fetch('/api/reset-stats', {method: 'POST'})
+                .then(() => loadStatsOnce());
+        }
+
+        function loadStatsOnce() {
+            fetch('/api/stats')
+                .then(r => r.json())
+                .then(data => {
+                    document.getElementById('variance-enabled').checked = !!data.variance_enabled;
+                    document.getElementById('global-jitter-px').value = data.global_jitter_px ?? 3;
+                    document.getElementById('global-jitter-time').value = Math.round(((data.global_time_jitter ?? 0.1) * 100));
+                    document.getElementById('max-total-clicks').value = data.max_total_clicks ?? '';
+                    document.getElementById('max-session-mins').value = data.max_session_minutes ?? '';
+                    document.getElementById('start-delay').value = data.default_start_delay ?? 0;
+                    document.getElementById('hotkey-pause').value = (data.hotkeys?.pause || 'p');
+                    document.getElementById('hotkey-stop').value = (data.hotkeys?.stop || 'q');
+                    document.getElementById('kbd-pause').textContent = (data.hotkeys?.pause || 'p').toUpperCase();
+                    document.getElementById('kbd-stop').textContent = (data.hotkeys?.stop || 'q').toUpperCase();
+                });
         }
         
         function startUpdates() {
@@ -899,11 +1148,24 @@ def index():
                             document.getElementById('pause-btn').disabled = !data.running;
                             document.getElementById('stop-btn').disabled = !data.running;
                             
-                            if (data.paused) {
-                                document.getElementById('pause-btn').textContent = '▶️ Resume';
-                            } else {
-                                document.getElementById('pause-btn').textContent = '⏸️ Pause';
-                            }
+                            setPauseButton(data.paused);
+                            // Disable mutating controls while running
+                            const disable = data.running;
+                            const posContainer = document.getElementById('positions-container');
+                            posContainer.querySelectorAll('.btn-edit,.btn-delete').forEach(b => b.disabled = disable);
+                            const addButtons = [document.getElementById('add-position-btn'), document.getElementById('add-seq-btn')];
+                            addButtons.forEach(btn => { if (btn) btn.disabled = disable; });
+                            // Reflect settings
+                            document.getElementById('variance-enabled').checked = !!data.variance_enabled;
+                            document.getElementById('global-jitter-px').value = data.global_jitter_px ?? 3;
+                            document.getElementById('global-jitter-time').value = Math.round(((data.global_time_jitter ?? 0.1) * 100));
+                            document.getElementById('max-total-clicks').value = data.max_total_clicks ?? '';
+                            document.getElementById('max-session-mins').value = data.max_session_minutes ?? '';
+                            document.getElementById('start-delay').value = data.default_start_delay ?? 0;
+                            document.getElementById('hotkey-pause').value = (data.hotkeys?.pause || 'p');
+                            document.getElementById('hotkey-stop').value = (data.hotkeys?.stop || 'q');
+                            document.getElementById('kbd-pause').textContent = (data.hotkeys?.pause || 'p').toUpperCase();
+                            document.getElementById('kbd-stop').textContent = (data.hotkeys?.stop || 'q').toUpperCase();
                         }
                         
                         if (data.positions) {
@@ -1059,7 +1321,7 @@ def index():
                             <div class="position-details">Then wait ${step.next_delay}s before next step</div>
                         </div>
                         <div class="position-actions">
-                            <button class="icon-btn btn-delete" onclick="removeSequenceStep(${i})">🗑️</button>
+                            <button class="icon-btn btn-delete" onclick="removeSequenceStep(${i})"><svg class="icon" aria-hidden="true"><use href="#i-trash"></use></svg></button>
                         </div>
                     </div>
                 `).join('') +
@@ -1122,7 +1384,7 @@ def index():
             if (sequences.length === 0) {
                 container.innerHTML = `
                     <div class="empty-state">
-                        <div class="empty-state-icon">🔄</div>
+                        <div class="empty-state-icon"><svg class="icon" aria-hidden="true"><use href="#i-loop"></use></svg></div>
                         <div class="empty-state-text">No sequences created yet</div>
                     </div>
                 `;
@@ -1136,13 +1398,13 @@ def index():
                             <div class="position-name">${seq.name}</div>
                             <div class="position-details">
                                 Key: ${i + 1} | Steps: ${seq.steps.length} | Executions: ${seq.executions || 0} | 
-                                ${seq.manual_only ? 'Manual Only' : 'Auto every ' + seq.auto_interval + 's'}
+                                ${seq.manual_trigger_only ? 'Manual Only' : 'Auto every ' + seq.auto_interval + 's'}
                             </div>
                         </div>
                         <div class="position-actions">
-                            <button class="icon-btn btn-edit" onclick="testSequence(${i})" title="Test">▶️</button>
-                            <button class="icon-btn" onclick="editSequence(${i})" title="Edit" style="background: #fff3e0; color: #ff9800;">✏️</button>
-                            <button class="icon-btn btn-delete" onclick="deleteSequence(${i})" title="Delete">🗑️</button>
+                            <button class="icon-btn btn-edit" onclick="testSequence(${i})" title="Test"><svg class="icon" aria-hidden="true"><use href="#i-play"></use></svg></button>
+                            <button class="icon-btn" onclick="editSequence(${i})" title="Edit" style="background: #fff3e0; color: #ff9800;"><svg class="icon" aria-hidden="true"><use href="#i-edit"></use></svg></button>
+                            <button class="icon-btn btn-delete" onclick="deleteSequence(${i})" title="Delete"><svg class="icon" aria-hidden="true"><use href="#i-trash"></use></svg></button>
                         </div>
                     </div>
                 `).join('') +
@@ -1162,7 +1424,7 @@ def index():
             document.getElementById('sequence-key').value = index + 1;
             
             // Set auto settings
-            const isManual = seq.manual_only;
+            const isManual = !!seq.manual_trigger_only;
             document.getElementById('sequence-auto-enabled').checked = !isManual;
             if (!isManual) {
                 document.getElementById('sequence-auto-interval').value = seq.auto_interval || 30;
@@ -1224,14 +1486,15 @@ def index():
                     .then(data => {
                         if (data.success) {
                             loadSequences();
-                        }
+                        } else if (data.message) { alert(data.message); }
                     });
             }
         }
         
-        // Load positions and sequences on start
+        // Load positions, sequences and settings on start
         loadPositions();
         loadSequences();
+        loadStatsOnce();
     </script>
 </body>
 </html>
@@ -1252,44 +1515,68 @@ def get_positions():
             'x': p['position'][0],
             'y': p['position'][1],
             'interval': p['interval'],
-            'clicks': p.get('clicks', 0)
+            'clicks': p.get('clicks', 0),
+            'button': p.get('button', 'left'),
+            'click_type': p.get('click_type', 'single'),
+            'hold_duration': p.get('hold_duration', 0.0),
+            'pos_jitter': p.get('pos_jitter', clicker.global_jitter_px),
+            'time_jitter': p.get('time_jitter', clicker.global_time_jitter)
         } for i, p in enumerate(clicker.positions)
     ]})
 
 @app.route('/api/add-position', methods=['POST'])
 def add_position():
     """Add a new position"""
-    data = request.json
+    if clicker.running:
+        return jsonify({'success': False, 'message': 'Cannot add while running'}), 400
+    data = request.json or {}
     position = {
-        'name': data['name'],
-        'position': (data['x'], data['y']),
-        'interval': data['interval'],
+        'name': data.get('name', f'Position {len(clicker.positions)+1}'),
+        'position': (int(data.get('x', 0)), int(data.get('y', 0))),
+        'interval': float(data.get('interval', 1.0)),
+        'button': data.get('button', 'left'),  # left, middle, right
+        'click_type': data.get('click_type', 'single'),  # single, double, hold
+        'hold_duration': float(data.get('hold_duration', 0.0)),
+        'pos_jitter': int(data.get('pos_jitter', clicker.global_jitter_px)),
+        'time_jitter': float(data.get('time_jitter', clicker.global_time_jitter)),
         'enabled': True,
         'clicks': 0
     }
-    clicker.positions.append(position)
+    with clicker.lock:
+        clicker.positions.append(position)
     return jsonify({'success': True})
 
 @app.route('/api/update-position/<int:index>', methods=['PUT'])
 def update_position(index):
     """Update a position"""
+    if clicker.running:
+        return jsonify({'success': False, 'message': 'Cannot edit while running'}), 400
     if 0 <= index < len(clicker.positions):
-        data = request.json
-        clicker.positions[index].update({
-            'name': data['name'],
-            'position': (data['x'], data['y']),
-            'interval': data['interval']
-        })
+        data = request.json or {}
+        with clicker.lock:
+            clicker.positions[index].update({
+                'name': data.get('name', clicker.positions[index].get('name')),
+                'position': (int(data.get('x', clicker.positions[index]['position'][0])), int(data.get('y', clicker.positions[index]['position'][1]))),
+                'interval': float(data.get('interval', clicker.positions[index]['interval'])),
+                'button': data.get('button', clicker.positions[index].get('button', 'left')),
+                'click_type': data.get('click_type', clicker.positions[index].get('click_type', 'single')),
+                'hold_duration': float(data.get('hold_duration', clicker.positions[index].get('hold_duration', 0.0))),
+                'pos_jitter': int(data.get('pos_jitter', clicker.positions[index].get('pos_jitter', clicker.global_jitter_px))),
+                'time_jitter': float(data.get('time_jitter', clicker.positions[index].get('time_jitter', clicker.global_time_jitter))),
+            })
         return jsonify({'success': True})
-    return jsonify({'success': False})
+    return jsonify({'success': False}), 404
 
 @app.route('/api/delete-position/<int:index>', methods=['DELETE'])
 def delete_position(index):
     """Delete a position"""
+    if clicker.running:
+        return jsonify({'success': False, 'message': 'Cannot delete while running'}), 400
     if 0 <= index < len(clicker.positions):
-        del clicker.positions[index]
+        with clicker.lock:
+            del clicker.positions[index]
         return jsonify({'success': True})
-    return jsonify({'success': False})
+    return jsonify({'success': False}), 404
 
 @app.route('/api/start', methods=['POST'])
 def start_clicking():
@@ -1300,29 +1587,43 @@ def start_clicking():
     if clicker.running:
         return jsonify({'success': False, 'message': 'Already running'})
     
+    # Prepare run flags
     clicker.running = True
     clicker.paused = False
     clicker.stop_event.clear()
     clicker.pause_event.set()
-    clicker.session_start_time = time.time()
-    
-    # Start clicking threads
-    for i, position in enumerate(clicker.positions):
-        if position['enabled']:
-            thread = threading.Thread(target=click_loop, args=(i,))
-            thread.daemon = True
-            thread.start()
-            clicker.threads.append(thread)
-    
-    # Start automatic sequence threads
-    for i, sequence in enumerate(clicker.sequences):
-        if not sequence.get('manual_trigger_only', True) and sequence.get('auto_interval', 0) > 0:
-            thread = threading.Thread(target=auto_sequence_loop, args=(i,))
-            thread.daemon = True
-            thread.start()
-            clicker.sequence_threads.append(thread)
-    
-    return jsonify({'success': True})
+
+    # Determine delay
+    req = request.json or {}
+    start_delay = int(req.get('start_delay') or clicker.default_start_delay or 0)
+
+    def _start_threads():
+        # session start time begins when threads start
+        clicker.session_start_time = time.time()
+        # Clear any leftover lists
+        clicker.threads.clear()
+        clicker.sequence_threads.clear()
+        # Start clicking threads
+        for i, position in enumerate(clicker.positions):
+            if position.get('enabled', True):
+                th = threading.Thread(target=click_loop, args=(i,))
+                th.daemon = True
+                th.start()
+                clicker.threads.append(th)
+        # Start automatic sequence threads
+        for i, sequence in enumerate(clicker.sequences):
+            if not sequence.get('manual_trigger_only', True) and sequence.get('auto_interval', 0) > 0:
+                th = threading.Thread(target=auto_sequence_loop, args=(i,))
+                th.daemon = True
+                th.start()
+                clicker.sequence_threads.append(th)
+
+    if start_delay > 0:
+        threading.Timer(start_delay, _start_threads).start()
+    else:
+        _start_threads()
+
+    return jsonify({'success': True, 'scheduled_in': start_delay})
 
 @app.route('/api/pause', methods=['POST'])
 def pause_clicking():
@@ -1346,9 +1647,13 @@ def stop_clicking():
     # Wait for threads
     for thread in clicker.threads:
         thread.join(timeout=1)
+    for thread in clicker.sequence_threads:
+        thread.join(timeout=1)
     
     clicker.threads.clear()
+    clicker.sequence_threads.clear()
     clicker.session_start_time = None
+    clicker.paused = False
     
     return jsonify({'success': True})
 
@@ -1368,6 +1673,13 @@ def get_stats():
         'session_time': session_time,
         'running': clicker.running,
         'paused': clicker.paused,
+        'variance_enabled': clicker.variance_enabled,
+        'global_jitter_px': clicker.global_jitter_px,
+        'global_time_jitter': clicker.global_time_jitter,
+        'max_total_clicks': clicker.max_total_clicks,
+        'max_session_minutes': clicker.max_session_minutes,
+        'default_start_delay': clicker.default_start_delay,
+        'hotkeys': clicker.hotkeys,
         'positions': [
             {
                 'name': p.get('name', f'Position {i+1}'),
@@ -1394,18 +1706,72 @@ def set_variance():
     clicker.variance_enabled = request.json['enabled']
     return jsonify({'success': True})
 
+@app.route('/api/settings', methods=['POST'])
+def update_settings():
+    """Update global settings including variance, jitter, limits and hotkeys"""
+    data = request.json or {}
+    with clicker.lock:
+        if 'variance_enabled' in data:
+            clicker.variance_enabled = bool(data['variance_enabled'])
+        if 'global_jitter_px' in data:
+            try:
+                clicker.global_jitter_px = max(0, int(data['global_jitter_px']))
+            except Exception:
+                pass
+        if 'global_time_jitter' in data:
+            try:
+                jt = float(data['global_time_jitter'])
+                clicker.global_time_jitter = max(0.0, jt)
+            except Exception:
+                pass
+        if 'max_total_clicks' in data:
+            mtc = data['max_total_clicks']
+            clicker.max_total_clicks = int(mtc) if mtc not in (None, '', 'null') else None
+        if 'max_session_minutes' in data:
+            msm = data['max_session_minutes']
+            clicker.max_session_minutes = int(msm) if msm not in (None, '', 'null') else None
+        if 'default_start_delay' in data:
+            try:
+                clicker.default_start_delay = max(0, int(data['default_start_delay']))
+            except Exception:
+                pass
+        if 'hotkeys' in data and isinstance(data['hotkeys'], dict):
+            hk = data['hotkeys']
+            pause = str(hk.get('pause', clicker.hotkeys['pause'])).lower()[:1] or clicker.hotkeys['pause']
+            stop = str(hk.get('stop', clicker.hotkeys['stop'])).lower()[:1] or clicker.hotkeys['stop']
+            clicker.hotkeys = {'pause': pause, 'stop': stop}
+    return jsonify({'success': True})
+
+@app.route('/api/reset-stats', methods=['POST'])
+def reset_stats():
+    """Reset total and per-position click counters"""
+    with clicker.lock:
+        clicker.total_clicks = 0
+        for p in clicker.positions:
+            p['clicks'] = 0
+    return jsonify({'success': True})
+
 @app.route('/api/save-config', methods=['POST'])
 def save_config():
     """Save configuration"""
     name = request.json['name']
+    # Sanitize filename to avoid traversal/invalid chars
+    name = re.sub(r'[^A-Za-z0-9._-]', '_', name).strip('_') or 'config'
     filename = os.path.join(CONFIG_DIR, f"{name}.json")
     
-    data = {
-        'positions': clicker.positions,
-        'sequences': clicker.sequences,
-        'variance_enabled': clicker.variance_enabled,
-        'timestamp': datetime.now().isoformat()
-    }
+    with clicker.lock:
+        data = {
+            'positions': clicker.positions,
+            'sequences': clicker.sequences,
+            'variance_enabled': clicker.variance_enabled,
+            'global_jitter_px': clicker.global_jitter_px,
+            'global_time_jitter': clicker.global_time_jitter,
+            'max_total_clicks': clicker.max_total_clicks,
+            'max_session_minutes': clicker.max_session_minutes,
+            'default_start_delay': clicker.default_start_delay,
+            'hotkeys': clicker.hotkeys,
+            'timestamp': datetime.now().isoformat()
+        }
     
     with open(filename, 'w') as f:
         json.dump(data, f, indent=2)
@@ -1425,6 +1791,7 @@ def get_configs():
 def load_config():
     """Load configuration"""
     name = request.json['name']
+    name = re.sub(r'[^A-Za-z0-9._-]', '_', name).strip('_') or 'config'
     filename = os.path.join(CONFIG_DIR, f"{name}.json")
     
     if not os.path.exists(filename):
@@ -1433,9 +1800,21 @@ def load_config():
     with open(filename, 'r') as f:
         data = json.load(f)
     
-    clicker.positions = data.get('positions', [])
-    clicker.sequences = data.get('sequences', [])
-    clicker.variance_enabled = data.get('variance_enabled', True)
+    with clicker.lock:
+        clicker.positions = data.get('positions', [])
+        clicker.sequences = data.get('sequences', [])
+        clicker.variance_enabled = data.get('variance_enabled', True)
+        clicker.global_jitter_px = data.get('global_jitter_px', 3)
+        clicker.global_time_jitter = data.get('global_time_jitter', 0.10)
+        clicker.max_total_clicks = data.get('max_total_clicks')
+        clicker.max_session_minutes = data.get('max_session_minutes')
+        clicker.default_start_delay = data.get('default_start_delay', 0)
+        hk = data.get('hotkeys') or {}
+        # sanitize hotkeys to single lower-case chars
+        clicker.hotkeys = {
+            'pause': str(hk.get('pause', 'p')).lower()[:1] or 'p',
+            'stop': str(hk.get('stop', 'q')).lower()[:1] or 'q',
+        }
     
     return jsonify({'success': True})
 
@@ -1447,15 +1826,18 @@ def get_sequences():
 @app.route('/api/add-sequence', methods=['POST'])
 def add_sequence():
     """Add a new sequence"""
-    data = request.json
+    if clicker.running:
+        return jsonify({'success': False, 'message': 'Cannot add while running'}), 400
+    data = request.json or {}
     sequence = {
-        'name': data['name'],
-        'steps': data['steps'],
+        'name': data.get('name', f'Sequence {len(clicker.sequences)+1}'),
+        'steps': data.get('steps', []),
         'manual_trigger_only': data.get('manual_trigger_only', True),
         'auto_interval': data.get('auto_interval', 0),
         'executions': 0
     }
-    clicker.sequences.append(sequence)
+    with clicker.lock:
+        clicker.sequences.append(sequence)
     
     # Start automatic sequence thread if needed
     if not sequence['manual_trigger_only'] and sequence['auto_interval'] > 0:
@@ -1470,24 +1852,30 @@ def add_sequence():
 @app.route('/api/update-sequence/<int:index>', methods=['PUT'])
 def update_sequence(index):
     """Update a sequence"""
+    if clicker.running:
+        return jsonify({'success': False, 'message': 'Cannot edit while running'}), 400
     if 0 <= index < len(clicker.sequences):
-        data = request.json
-        clicker.sequences[index].update({
-            'name': data['name'],
-            'steps': data['steps'],
-            'manual_trigger_only': data.get('manual_trigger_only', True),
-            'auto_interval': data.get('auto_interval', 0)
-        })
+        data = request.json or {}
+        with clicker.lock:
+            clicker.sequences[index].update({
+                'name': data.get('name', clicker.sequences[index].get('name')),
+                'steps': data.get('steps', clicker.sequences[index].get('steps', [])),
+                'manual_trigger_only': data.get('manual_trigger_only', clicker.sequences[index].get('manual_trigger_only', True)),
+                'auto_interval': data.get('auto_interval', clicker.sequences[index].get('auto_interval', 0))
+            })
         return jsonify({'success': True})
-    return jsonify({'success': False})
+    return jsonify({'success': False}), 404
 
 @app.route('/api/delete-sequence/<int:index>', methods=['DELETE'])
 def delete_sequence(index):
     """Delete a sequence"""
+    if clicker.running:
+        return jsonify({'success': False, 'message': 'Cannot delete while running'}), 400
     if 0 <= index < len(clicker.sequences):
-        del clicker.sequences[index]
+        with clicker.lock:
+            del clicker.sequences[index]
         return jsonify({'success': True})
-    return jsonify({'success': False})
+    return jsonify({'success': False}), 404
 
 @app.route('/api/trigger-sequence/<int:index>', methods=['POST'])
 def trigger_sequence(index):
@@ -1509,27 +1897,56 @@ def click_loop(position_index):
         if clicker.stop_event.is_set():
             break
         
-        # Click with optional variance
-        x, y = position['position']
+        # Snapshot current settings
+        btn = position.get('button', 'left')
+        ctype = position.get('click_type', 'single')
+        hold = float(position.get('hold_duration', 0.0) or 0.0)
+        base_x, base_y = position['position']
+        base_interval = float(position.get('interval', 1.0) or 1.0)
+        # Apply variance
+        x, y = base_x, base_y
         if clicker.variance_enabled:
-            x += random.randint(-3, 3)
-            y += random.randint(-3, 3)
-        
+            jitter_px = int(position.get('pos_jitter', clicker.global_jitter_px) or 0)
+            if jitter_px > 0:
+                x += random.randint(-jitter_px, jitter_px)
+                y += random.randint(-jitter_px, jitter_px)
         try:
-            pyautogui.click(x, y)
+            if ctype == 'double':
+                pyautogui.click(x=x, y=y, button=btn, clicks=2, interval=0.05)
+            elif ctype == 'hold' and hold > 0:
+                pyautogui.mouseDown(x=x, y=y, button=btn)
+                time.sleep(hold)
+                pyautogui.mouseUp(x=x, y=y, button=btn)
+            else:
+                pyautogui.click(x=x, y=y, button=btn)
             # Update statistics
             position['clicks'] = position.get('clicks', 0) + 1
             clicker.total_clicks += 1
         except Exception as e:
-            print(f"Click error at ({x}, {y}): {e}")
-            # Continue running despite click errors
+            logging.warning(f"Click error at ({x}, {y}): {e}")
+        
+        # Check global limits
+        if clicker.max_total_clicks is not None and clicker.total_clicks >= clicker.max_total_clicks:
+            logging.info("Max total clicks reached; stopping")
+            clicker.running = False
+            clicker.stop_event.set()
+            clicker.pause_event.set()
+            break
+        if clicker.max_session_minutes is not None and clicker.session_start_time:
+            if (time.time() - clicker.session_start_time) >= clicker.max_session_minutes * 60:
+                logging.info("Max session minutes reached; stopping")
+                clicker.running = False
+                clicker.stop_event.set()
+                clicker.pause_event.set()
+                break
         
         # Sleep with optional variance
-        interval = position['interval']
+        interval = base_interval
         if clicker.variance_enabled:
-            interval *= random.uniform(0.9, 1.1)
-        
-        time.sleep(interval)
+            tj = float(position.get('time_jitter', clicker.global_time_jitter) or 0.0)
+            if tj > 0:
+                interval *= random.uniform(max(0.0, 1 - tj), 1 + tj)
+        time.sleep(max(0.0, interval))
 
 def setup_global_keyboard_listener():
     """Setup global keyboard listener that works even when browser isn't focused"""
@@ -1538,7 +1955,7 @@ def setup_global_keyboard_listener():
             if hasattr(key, 'char') and key.char:
                 char = key.char.lower()
                 
-                if char == 'p':
+                if char == clicker.hotkeys.get('pause', 'p'):
                     # Toggle pause/resume
                     if clicker.running:
                         if clicker.paused:
@@ -1550,7 +1967,7 @@ def setup_global_keyboard_listener():
                             clicker.paused = True
                             print("\n[P] Paused clicking")
                 
-                elif char == 'q':
+                elif char == clicker.hotkeys.get('stop', 'q'):
                     # Stop everything
                     if clicker.running:
                         print("\n[Q] Stopping auto-clicker...")
@@ -1584,7 +2001,9 @@ def setup_global_keyboard_listener():
     listener = keyboard.Listener(on_press=on_key_press)
     listener.daemon = True
     listener.start()
-    print("Global keyboard listener started (P=pause, Q=stop, 1-9=sequences)")
+    print("Global keyboard listener started (pause={}, stop={}, 1-9=sequences)".format(
+        clicker.hotkeys.get('pause', 'p').upper(), clicker.hotkeys.get('stop', 'q').upper()
+    ))
 
 def auto_sequence_loop(sequence_index):
     """Automatic sequence loop that runs on a timer"""
@@ -1597,13 +2016,14 @@ def auto_sequence_loop(sequence_index):
     print(f"Starting automatic sequence: {sequence['name']} (every {interval}s)")
     
     while not clicker.stop_event.is_set():
-        # Wait for the interval
+        # Wait for the interval or stop
         if clicker.stop_event.wait(timeout=interval):
             break
-            
-        # Execute the sequence if clicker is running
-        if clicker.running and not clicker.stop_event.is_set():
-            execute_sequence(sequence_index, manual_trigger=False)
+        # Skip if not running or paused
+        if not clicker.running or clicker.paused or clicker.stop_event.is_set():
+            continue
+        # Execute sequence
+        execute_sequence(sequence_index, manual_trigger=False)
 
 def execute_sequence(sequence_index, manual_trigger=False):
     """Execute a sequence of clicks"""
@@ -1622,20 +2042,32 @@ def execute_sequence(sequence_index, manual_trigger=False):
         for i, step in enumerate(sequence['steps']):
             if clicker.stop_event.is_set():
                 break
+            # Respect pause
+            clicker.pause_event.wait()
             
             # All steps are clicks with next_delay
             pos_index = step['position_index']
             if pos_index < len(clicker.positions):
                 position = clicker.positions[pos_index]
-                x, y = position['position']
-                
-                # Apply variance if enabled
+                base_x, base_y = position['position']
+                x, y = base_x, base_y
                 if clicker.variance_enabled:
-                    x += random.randint(-3, 3)
-                    y += random.randint(-3, 3)
-                
+                    jitter_px = int(position.get('pos_jitter', clicker.global_jitter_px) or 0)
+                    if jitter_px > 0:
+                        x += random.randint(-jitter_px, jitter_px)
+                        y += random.randint(-jitter_px, jitter_px)
+                btn = position.get('button', 'left')
+                ctype = position.get('click_type', 'single')
+                hold = float(position.get('hold_duration', 0.0) or 0.0)
                 try:
-                    pyautogui.click(x, y)
+                    if ctype == 'double':
+                        pyautogui.click(x=x, y=y, button=btn, clicks=2, interval=0.05)
+                    elif ctype == 'hold' and hold > 0:
+                        pyautogui.mouseDown(x=x, y=y, button=btn)
+                        time.sleep(hold)
+                        pyautogui.mouseUp(x=x, y=y, button=btn)
+                    else:
+                        pyautogui.click(x=x, y=y, button=btn)
                     clicker.total_clicks += 1
                     print(f"  Step {i+1}: Clicked {position.get('name', 'position')} at ({x}, {y})")
                 except Exception as e:
@@ -1646,8 +2078,16 @@ def execute_sequence(sequence_index, manual_trigger=False):
                     delay = step.get('next_delay', 0)
                     if delay > 0:
                         if clicker.variance_enabled:
-                            delay *= random.uniform(0.9, 1.1)
-                        time.sleep(delay)
+                            tj = float(position.get('time_jitter', clicker.global_time_jitter) or 0.0)
+                            if tj > 0:
+                                delay *= random.uniform(max(0.0, 1 - tj), 1 + tj)
+                        # Sleep in small increments to remain pause/stop responsive
+                        end_time = time.time() + max(0.0, delay)
+                        while time.time() < end_time and not clicker.stop_event.is_set():
+                            # If paused, wait
+                            if clicker.paused:
+                                clicker.pause_event.wait()
+                            time.sleep(0.01)
                 
         # Update execution count
         sequence['executions'] = sequence.get('executions', 0) + 1
@@ -1663,8 +2103,8 @@ if __name__ == '__main__':
     print("\nStarting web server...")
     print("\n✅ Open your browser to: http://localhost:8080")
     print("\n🎹 Global keyboard shortcuts:")
-    print("   P = Pause/Resume clicking")
-    print("   Q = Stop clicking")
+    print(f"   {clicker.hotkeys.get('pause','p').upper()} = Pause/Resume clicking")
+    print(f"   {clicker.hotkeys.get('stop','q').upper()} = Stop clicking")
     print("   1-9 = Trigger sequences")
     print("\nPress Ctrl+C to stop the server\n")
     
